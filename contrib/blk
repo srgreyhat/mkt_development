@@ -1,0 +1,50 @@
+#!/bin/bash
+
+usage="Usage: mkt [ info | stake | latest | dust ] \n \n
+	info: Check basic info. \n
+	stake: Enables staking; Passes password without storing it in memory. \n
+	latest: Compares latest block with the MarketcoinNL hosted block explorer. \n
+	dust: Prunes dust from wallet. Dust is defined as less than .0001MKT. Requires jq. \n"
+
+mktc='/usr/local/bin/marketcoin-cli -datadir=/var/lib/.marketcoin/'
+
+case $1 in
+
+info )
+	$mktc getwalletinfo | egrep "balance|staked_balance|txcount|unconfirmed_balance|immature_balance|total_balance";
+	$mktc getnetworkinfo | egrep "subversion|connections";
+	$mktc getinfo | egrep "blocks";
+	$mktc getblockchaininfo | egrep "best";
+	$mktc getstakinginfo | egrep "enabled|staking|netstakeweight|expectedtime";
+;;	
+
+stake )
+	echo 'enter Marketcoin Password'
+	read -s MKTPW
+	$mktc walletpassphrase $MKTPW 99999999 true
+	MKTPW=null
+;;
+
+latest )
+	latest=$($mktc  getblockcount) && \
+	    blacksight=$(curl -s https://node.marketcoin.io/insight-api/block-index/$latest? |  cut -d '"' -f4) && \
+	    marketcoin=$($mktc  getblockhash $latest) && \
+	    diff -sy --label Local <(echo $marketcoin) --label Explorer <(echo $blacksight)
+;;
+
+dust )
+	IFS=$'\n';
+
+	 /usr/local/bin/marketcoin-cli -datadir=/var/lib/.marketcoin/ listtransactions "*" 99999 | jq -r '.[] | select(.category != "send") | select(.amount < .0001) | .txid' | uniq >txid.txt
+
+	while read line; do
+	        echo $line 
+	        /usr/local/bin/marketcoin-cli -datadir=/var/lib/.marketcoin/ removeprunedfunds $(echo $line)
+	done < "txid.txt"
+;;
+
+*)
+    echo -e $usage
+;;	
+
+esac
